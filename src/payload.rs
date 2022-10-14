@@ -9,148 +9,171 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
-use derive_builder::Builder;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// Wrapper that causes the internal type to be serialized
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StringySerde<T>(pub T);
+
+impl<T: ToString> Serialize for StringySerde<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // TODO: reusable thread-local buffer or something like that
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+#[derive(Default, Serialize, Clone, Copy, Debug)]
 pub enum EventType {
-    #[serde(rename(serialize = "se"))]
-    StructuredEvent,
+    #[default]
     #[serde(rename(serialize = "ue"))]
     SelfDescribingEvent,
 }
 
-#[derive(Builder, Serialize, Deserialize, Default, Clone, Debug)]
-#[builder(field(public))]
-#[builder(pattern = "owned")]
+#[derive(Debug, Default, Serialize, Clone, Copy)]
+pub enum Platform {
+    /// Websites
+    #[serde(rename = "web")]
+    Web,
+
+    /// Mobile apps (for smartphones, tablets, etc)
+    #[serde(rename = "mob")]
+    Mobile,
+
+    /// Native desktop apps used by consumers
+    #[serde(rename = "pc")]
+    Desktop,
+
+    /// Applications used on servers, like web servers, databases, etc
+    #[serde(rename = "srv")]
+    ServerSide,
+
+    /// General app
+    #[default]
+    #[serde(rename = "app")]
+    App,
+    // TODO: iot, tv, cnsl
+}
+
+// TODO: use a real timekeeping crate and a real timestamp in this struct
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+struct SnowplowTimestamp {
+    // a snowplow timestamp is "unix time but in milliseconds". 64 bits is
+    // roughly 1 order of magnitude short of being able to express the
+    // estimated age of the universe, so we assume it's fine for our purposes.
+    timestamp: i64,
+}
+
+#[derive(Serialize, Default, Clone, Debug)]
 pub struct Payload {
-    p: String,
-    tv: String,
-    pub eid: uuid::Uuid,
-    dtm: String,
-    stm: String,
-    #[builder(setter(strip_option))]
-    e: Option<EventType>,
-    aid: String,
-    #[builder(default)]
+    // TODO: replace this with an enum that handles the variations
+    #[serde(rename = "e")]
+    pub event_type: EventType,
+
+    #[serde(rename = "p")]
+    pub platform: Platform,
+
+    /// An identifier describing this app
+    #[serde(rename = "aid")]
+    pub app_id: String,
+
+    /// The name of the tracker. This should generally always be the name &
+    /// version of this Rust crate
+    #[serde(rename = "tv")]
+    pub tracker_id: &'static str,
+
+    #[serde(rename = "eid")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(setter(strip_option))]
-    pub(crate) ue_pr: Option<SelfDescribingEventData>,
-    #[builder(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(setter(strip_option))]
-    co: Option<ContextData>,
-    // Stuctured Event
-    #[builder(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(setter(strip_option))]
-    pub(crate) se_ca: Option<String>,
-    #[builder(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(setter(strip_option))]
-    pub(crate) se_ac: Option<String>,
-    #[builder(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) se_la: Option<String>,
-    #[builder(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) se_pr: Option<String>,
-    #[builder(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) se_va: Option<String>,
+    pub eid: Option<uuid::Uuid>,
+
+    /// The timestamp at which this event occurred.
+    #[serde(rename = "dtm")]
+    created_timestamp: SnowplowTimestamp,
+
+    /// The timestamp at which this event was sent to a collector. This should
+    /// be populated by the emitter at the moment the event is sent.
+    #[serde(rename = "stm")]
+    sent_timestamp: SnowplowTimestamp,
+    // TODO: Context
+    // TODO: payload
 }
 
-impl Payload {
-    pub fn builder() -> PayloadBuilder {
-        PayloadBuilder::default()
+/// An Iglu Schema version. Renders as `"{major}-{minor}-{patch}"`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SchemaVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl Display for SchemaVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let Self {
+            major,
+            minor,
+            patch,
+        } = *self;
+
+        write!(f, "{major}-{minor}-{patch}")
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
-pub struct SelfDescribingEventData {
-    pub schema: String,
-    pub data: SelfDescribingJson,
+/// An Iglu Schema. Renders as "`iglu:{vendor}/{name}/jsonschema/{version}`"
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Schema {
+    /// Typically a reverse domain name, like "com.agilebits.desktop"
+    pub vendor: &'static str,
+
+    /// The name of this specific schema
+    pub name: &'static str,
+
+    /// The version of this specific schema
+    pub version: SchemaVersion,
 }
 
-impl SelfDescribingEventData {
-    pub fn new(data: SelfDescribingJson) -> SelfDescribingEventData {
-        SelfDescribingEventData {
-            schema:  String::from("iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0"),
-            data: data
-        }
+impl Display for Schema {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let Self {
+            vendor,
+            name,
+            version,
+        } = *self;
+
+        write!(f, "iglu:{vendor}/{name}/jsonschema/{version}")
     }
 }
 
-// The collector expects the `data` field of the `SelfDescribingEventData` to be an object,
-// but the SelfDescribingEventData to be a string, so we have to manually serialize SelfDescribingEventData
-impl Serialize for SelfDescribingEventData {
+impl Serialize for Schema {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(
-            &json!({
-                "schema": self.schema,
-                "data": self.data,
-            })
-            .to_string(),
-        )
+        serializer.collect_str(self)
     }
 }
 
-/// Self-describing JSON to be used mainly when creating context entities.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct SelfDescribingJson {
+/// Catch-all type for the snowplow data envelope, which combines a snowplow
+/// schema ID with some kind of payload
+#[derive(Serialize, Deserialize)]
+pub struct Envelope<T> {
     /// A valid Iglu schema path.
     ///
-    /// This must point to the location of the custom event’s schema, of the format: `iglu:{vendor}/{name}/{format}/{version}`.
-    pub schema: String,
+    /// This must point to the location of the custom event’s schema, of the
+    /// format: `iglu:{vendor}/{name}/{format}/{version}`.
+    pub schema: Schema,
 
     /// The custom data for the event.
     ///
-    /// This data must conform to the schema specified in the schema argument, or the event will fail validation and land in bad rows.
-    pub data: Value,
-}
-
-impl SelfDescribingJson {
-    pub fn new(schema: &str, data: Value) -> SelfDescribingJson {
-        SelfDescribingJson {
-            schema: schema.to_string(),
-            data: data,
-        }
-    }
-}
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct ContextData {
-    pub schema: String,
-    pub data: Vec<SelfDescribingJson>,
-}
-
-impl ContextData {
-    pub fn new(data: Vec<SelfDescribingJson>) -> ContextData {
-        ContextData {
-            schema: String::from("iglu:com.snowplowanalytics.snowplow/contexts/jsonschema/1-0-1"),
-            data
-        }
-    }
-}
-
-// The collector expects the `data` field of the `SelfDescribingEventData` to be an object,
-// but the SelfDescribingEventData to be a string, so we have to manually serialize SelfDescribingEventData
-impl Serialize for ContextData {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(
-            &json!({
-                "schema": self.schema,
-                "data": self.data,
-            })
-            .to_string(),
-        )
-    }
+    /// This data must conform to the schema specified in the schema argument,
+    /// or the event will fail validation and land in bad rows.
+    pub data: T,
 }

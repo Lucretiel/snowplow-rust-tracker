@@ -27,6 +27,7 @@ async fn main() {
         ])
     ).await.unwrap();
 
+
     let struct_event_id = tracker
         .track(
             StructuredEvent::builder()

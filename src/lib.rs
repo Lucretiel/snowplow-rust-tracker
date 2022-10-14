@@ -33,6 +33,7 @@
 //!     ])
 //! );
 //! ```
+#![deny(missing_docs)]
 
 mod tracker;
 mod emitter;

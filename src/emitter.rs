@@ -9,50 +9,62 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
-use reqwest::Client;
-use crate::payload::Payload;
-use serde_json::json;
+use std::future::ready;
 
-pub struct Emitter {
-    pub collector_url: String,
-    http_client: Client,
+use futures::TryStreamExt as _;
+use reqwest::Client;
+use serde::Serialize;
+
+use url::Url;
+
+use crate::payload::Payload;
+
+#[derive(Debug, Clone, Serialize)]
+struct PayloadContainer {
+    schema: &'static str,
+    data: Vec<Payload>,
 }
 
-/// Emitter is responsible for emitting tracked events to the Snowplow Collector
+/// Emitter is responsible for emitting tracked events to the Snowplow
+/// Collector. It takes care of the low-level HTTP stuff.
+pub struct Emitter {
+    collector_url: Url,
+    client: Client,
+}
+
 impl Emitter {
-    pub fn new(collector_url: &str) -> Emitter {
+    pub fn new(collector_url: Url, client: Client) -> Emitter {
         Emitter {
-            collector_url: collector_url.to_string(),
-            http_client: Client::new(),
+            collector_url,
+            client,
         }
     }
 
-    /// Add event to be sent to the Collector
-    pub async fn add(&self, payload: Payload) -> Result<(), reqwest::Error> {
-        let result = self.post(payload).await;
-        match result {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e)
-        }
-    }
+    pub async fn track_events(
+        &self,
+        events: impl IntoIterator<Item = Payload>,
+    ) -> Result<(), reqwest::Error> {
+        let events = PayloadContainer {
+            schema: "iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4",
+            data: events.into_iter().collect(),
+        };
 
-    async fn post(&self, payload: Payload) -> Result<String, reqwest::Error> {
-        let collector_url = self.collector_url.to_string() + "/com.snowplowanalytics.snowplow/tp2";
-
-        let payload = json!({
-            "schema": "iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4",
-            "data": vec![payload]
-        });
-
-        let resp = self
-            .http_client
-            .post(collector_url)
-            .json(&payload)
+        let response = self
+            .client
+            .post(self.collector_url.clone())
+            .json(&events)
             .send()
             .await?;
 
-        resp.text().await
+        // Snowplow responses don't contain anything useful, so just drain the
+        // response content.
+        response
+            .bytes_stream()
+            .try_for_each(|_chunk| ready(Ok(())))
+            .await
+    }
+
+    pub async fn track_event(&self, event: Payload) -> Result<(), reqwest::Error> {
+        self.track_events([event]).await
     }
 }
-
-

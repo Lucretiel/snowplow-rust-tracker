@@ -10,16 +10,15 @@
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
 use crate::emitter::Emitter;
-use crate::payload::{Payload, ContextData, SelfDescribingJson};
 use crate::event::EventBuildable;
-use uuid::Uuid;
+use crate::payload::{ContextData, Payload, SelfDescribingJson};
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
+use uuid::Uuid;
 
 pub struct TrackerConfig {
     pub platform: String,
     pub version: String,
-    pub encode_base_64: bool,
 }
 
 /// Snowplow tracker instance used to track events to the Snowplow Collector
@@ -35,6 +34,7 @@ pub struct Tracker {
 }
 
 impl Tracker {
+    /// Create a new tracker
     pub fn new(namespace: &str, app_id: &str, emitter: Emitter) -> Tracker {
         Tracker {
             namespace: namespace.to_string(),
@@ -43,13 +43,16 @@ impl Tracker {
             config: TrackerConfig {
                 platform: "pc".to_string(),
                 version: "rust-0.1.0".to_string(),
-                encode_base_64: false,
-            }
+            },
         }
     }
 
     /// Tracks a Snowplow event with optional context entities and sends it to the Snowplow collector.
-    pub async fn track(&self, event: impl EventBuildable, context: Option<Vec<SelfDescribingJson>>) -> Option<Uuid> {
+    pub async fn track(
+        &self,
+        event: impl EventBuildable,
+        context: Option<Vec<SelfDescribingJson>>,
+    ) -> Option<Uuid> {
         let since_the_epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
