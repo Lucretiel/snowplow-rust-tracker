@@ -12,10 +12,13 @@
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::time::SystemTime;
 
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use serde_json::Value;
+use serde::ser::SerializeStruct as _;
+use serde::{Serialize, Serializer};
+
+use crate::util::JsonString;
+use crate::util::Stringify;
 
 /// Wrapper that causes the internal type to be serialized
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +41,9 @@ pub enum EventType {
     SelfDescribingEvent,
 }
 
+/// The platform this tracker is being used on. This is generally fixed at
+/// compile time, but this library is broadly cross-platform, so it still needs
+/// to be provided during [`Tracker`][crate::Tracker] configuration.
 #[derive(Debug, Default, Serialize, Clone, Copy)]
 pub enum Platform {
     /// Websites
@@ -60,59 +66,121 @@ pub enum Platform {
     #[default]
     #[serde(rename = "app")]
     App,
-    // TODO: iot, tv, cnsl
+
+    /// Smart TV
+    #[serde(rename = "tv")]
+    Tv,
+
+    /// Video game console
+    #[serde(rename = "cnsl")]
+    GameConsole,
+
+    /// Internet of Things device
+    #[serde(rename = "iot")]
+    Thing,
 }
 
-// TODO: use a real timekeeping crate and a real timestamp in this struct
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-struct SnowplowTimestamp {
-    // a snowplow timestamp is "unix time but in milliseconds". 64 bits is
-    // roughly 1 order of magnitude short of being able to express the
-    // estimated age of the universe, so we assume it's fine for our purposes.
-    timestamp: i64,
+/// A snowplow timestamp. Serializes as the number of seconds since the unix
+/// epoch.
+///
+/// Note that this type serializes as a string, even though it has numeric
+/// representation, in keeping with the Snowplow Protocol. You should probably
+/// not use it for your own custom event timekeeping.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct SnowplowTimestamp {
+    timestamp: SystemTime,
 }
 
-#[derive(Serialize, Default, Clone, Debug)]
-pub struct Payload {
+impl SnowplowTimestamp {
+    pub fn now() -> Self {
+        Self {
+            timestamp: SystemTime::now(),
+        }
+    }
+}
+
+impl Serialize for SnowplowTimestamp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // TODO: log a warning. Bring in tracing for general logging.
+        let timestamp_millis = self
+            .timestamp
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+
+        let mut buffer = itoa::Buffer::new();
+        let formatted = buffer.format(timestamp_millis);
+
+        serializer.serialize_str(formatted)
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SnowplowEvent<'a, Payload: HasSchema> {
+    // ----- PAYLOAD ------
     // TODO: replace this with an enum that handles the variations
     #[serde(rename = "e")]
     pub event_type: EventType,
 
+    #[serde(rename = "ue_pr")]
+    pub payload: JsonString<PayloadWrapper<Payload>>,
+
+    // ------ APPLICATION PARAMETERS ------
     #[serde(rename = "p")]
     pub platform: Platform,
 
     /// An identifier describing this app
     #[serde(rename = "aid")]
-    pub app_id: String,
+    pub app_id: &'a str,
 
     /// The name of the tracker. This should generally always be the name &
     /// version of this Rust crate
     #[serde(rename = "tv")]
     pub tracker_id: &'static str,
 
+    /// An identifier describing this specific tracker in the context of the
+    /// application. If your application is using multiple trackers, this field
+    /// distinguishes between them.
+    #[serde(rename = "tna")]
+    pub namespace: &'a str,
+
+    // ----- GENERIC EVENT META ------
     #[serde(rename = "eid")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub eid: Option<uuid::Uuid>,
+    pub event_id: Option<uuid::Uuid>,
 
     /// The timestamp at which this event occurred.
     #[serde(rename = "dtm")]
-    created_timestamp: SnowplowTimestamp,
+    pub created_timestamp: SnowplowTimestamp,
 
     /// The timestamp at which this event was sent to a collector. This should
     /// be populated by the emitter at the moment the event is sent.
     #[serde(rename = "stm")]
-    sent_timestamp: SnowplowTimestamp,
-    // TODO: Context
-    // TODO: payload
+    pub sent_timestamp: SnowplowTimestamp,
 }
 
-/// An Iglu Schema version. Renders as `"{major}-{minor}-{patch}"`
+/// An Iglu Schema version. Renders as `{major}-{minor}-{patch}`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SchemaVersion {
+#[allow(missing_docs)]
+pub struct SchemaVersion {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
+}
+
+impl SchemaVersion {
+    /// Create a new Snowplow schema version, of the form
+    /// `{major}-{minor}-{patch}`.
+    pub fn new(major: u32, minor: u32, patch: u32) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
+    }
 }
 
 impl Display for SchemaVersion {
@@ -127,9 +195,9 @@ impl Display for SchemaVersion {
     }
 }
 
-/// An Iglu Schema. Renders as "`iglu:{vendor}/{name}/jsonschema/{version}`"
+/// An Iglu Schema. Renders as `iglu:{vendor}/{name}/jsonschema/{version}`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Schema {
+pub struct Schema {
     /// Typically a reverse domain name, like "com.agilebits.desktop"
     pub vendor: &'static str,
 
@@ -138,6 +206,33 @@ struct Schema {
 
     /// The version of this specific schema
     pub version: SchemaVersion,
+}
+
+impl Schema {
+    /// Build a new schema. This will resemble
+    /// "`iglu:{vendor}/{name}/jsonschema/{version}`". Schemas tend to be fixed
+    /// to a particular type, so all the string components are `&'static str`
+    // TODO: macro version of this constructor so that the entire schema
+    // can been build-time concatenated as a single string. This would provide
+    // an opportunity for build time verification of the various components.
+    #[inline]
+    #[must_use]
+    pub fn new(vendor: &'static str, name: &'static str, version: SchemaVersion) -> Self {
+        Self {
+            vendor,
+            name,
+            version,
+        }
+    }
+
+    /// Build a new schema where the vendor is `com.snowplowanalytics.snowplow`.
+    /// For now this is internal-only; if library consumers want to use a
+    /// Snowplow first-party schema, we still ask them to be explicit and
+    /// supply the vendor themselves, for consistency.
+    #[inline]
+    pub(crate) fn new_snowplow(name: &'static str, version: SchemaVersion) -> Self {
+        Self::new("com.snowplowanalytics.snowplow", name, version)
+    }
 }
 
 impl Display for Schema {
@@ -152,28 +247,77 @@ impl Display for Schema {
     }
 }
 
-impl Serialize for Schema {
+/// Catch-all type for the snowplow data envelope, which combines a snowplow
+/// schema ID with some kind of payload. The payload includes the schema via
+/// the [`HasSchema`] trait. The [`Envelope`] will serialize as an object
+/// resembling `{"schema": "SCHEMA", "data": data}`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Envelope<T: HasSchema>(
+    /// The custom data for the event.
+    ///
+    /// The schema for this data is a part of the data's type, via [`HasSchema`]
+    pub T,
+);
+
+/// Trait for types that have a Snowplow Schema. See [`Envelope`] for details.
+pub trait HasSchema {
+    /// Get the schema associated with this type.
+    fn schema(&self) -> Schema;
+}
+
+impl<T: HasSchema + Serialize> Serialize for Envelope<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
-        serializer.collect_str(self)
+        let data = &self.0;
+        let mut map = serializer.serialize_struct("Envelope", 2)?;
+        map.serialize_field("schema", &Stringify(data.schema()))?;
+        map.serialize_field("data", &data)?;
+        map.end()
     }
 }
 
-/// Catch-all type for the snowplow data envelope, which combines a snowplow
-/// schema ID with some kind of payload
-#[derive(Serialize, Deserialize)]
-pub struct Envelope<T> {
-    /// A valid Iglu schema path.
-    ///
-    /// This must point to the location of the custom event’s schema, of the
-    /// format: `iglu:{vendor}/{name}/{format}/{version}`.
-    pub schema: Schema,
+/**
+Snowplow imposes a *lot* of nesting on the way that event playloads are sent.
+A typical event payload resembles:
 
-    /// The custom data for the event.
-    ///
-    /// This data must conform to the schema specified in the schema argument,
-    /// or the event will fail validation and land in bad rows.
-    pub data: T,
+```json
+{
+  "schema": "iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0",
+  "data": {
+    "schema": "iglu:com.my_company/viewed_product/jsonschema/1-0-0",
+    "data": {
+      "product_id": "ASO01043",
+      "price": 49.95
+    }
+  }
+}
+```
+
+This type handles this nested wrapper. The innermost `Payload` type corresponds
+to the `{"product_id", "price"}` struct above, which should implement
+[`HasSchema`]; the remaining nesting (including the outer snowplow schema) is
+handled here.
+*/
+pub type PayloadWrapper<Payload> = Envelope<UnstructWrapper<Envelope<Payload>>>;
+
+/// An [`UnstructWrapper`] corresponds to the outer "data" envelope of the
+/// Snowplow Unstructured Event layout. It mostly exists to supply the
+/// `"iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0"`
+/// schema via [`HasSchema`].
+#[derive(Debug, Clone, Default, Copy, Serialize)]
+#[serde(transparent)]
+pub struct UnstructWrapper<Payload>(pub Payload);
+
+impl<Payload> HasSchema for UnstructWrapper<Payload> {
+    fn schema(&self) -> Schema {
+        Schema::new_snowplow("unstruct_event", SchemaVersion::new(1, 0, 0))
+    }
+}
+
+impl<Payload: HasSchema> PayloadWrapper<Payload> {
+    pub fn new(payload: Payload) -> Self {
+        Envelope(UnstructWrapper(Envelope(payload)))
+    }
 }

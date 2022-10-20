@@ -9,53 +9,53 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
-use serde_json::json;
-use snowplow_tracker::{Snowplow, ScreenViewEvent, StructuredEvent, SelfDescribingJson, SelfDescribingEvent};
+use serde::Serialize;
+use snowplow_tracker::{HasSchema, Platform, Schema, SchemaVersion, TrackedEvent, Tracker};
 use uuid::Uuid;
+
+// An example unstructured event we might want to track
+#[derive(Debug, Serialize)]
+struct WebPage {
+    name: String,
+    id: String,
+}
+
+impl HasSchema for WebPage {
+    fn schema(&self) -> Schema {
+        Schema::new(
+            "com.snowplowanalytics.snowplow",
+            "screen_view",
+            SchemaVersion::new(1, 0, 0),
+        )
+    }
+}
 
 #[tokio::main]
 async fn main() {
-    let tracker = Snowplow::create_tracker("ns", "app_id", "http://localhost:9090");
+    let tracker = Tracker::build(
+        "ns",
+        "app_id".to_owned(),
+        Platform::Desktop,
+        "http://localhost:9090/com.snowplowanalytics.snowplow/tp2"
+            .parse()
+            .expect("hardcoded URL"),
+        reqwest::Client::new(),
+    );
 
-    let self_desc_event_id = tracker.track(
-        SelfDescribingEvent {
-            schema: "iglu:com.snowplowanalytics.snowplow/screen_view/jsonschema/1-0-0".to_string(),
-            data: json!({"name": "test", "id": "something else"})
-        },
-        Some(vec![
-            SelfDescribingJson::new("iglu:org.schema/WebPage/jsonschema/1-0-0", json!({"keywords": ["tester"]}))
-        ])
-    ).await.unwrap();
+    let event_id = Uuid::new_v4();
 
-
-    let struct_event_id = tracker
-        .track(
-            StructuredEvent::builder()
-                .category("shop")
-                .action("add-to-basket")
-                .label("Add To Basket".to_string())
-                .property("pcs".to_string())
-                .value(2.0)
-                .build()
-                .unwrap(),
-            None
-        ).await
-        .unwrap();
-
-    let screen_view_event_id = tracker
-        .track(
-            ScreenViewEvent::builder()
-                .id(Uuid::new_v4())
-                .name("a screen view")
-                .previous_name("previous screen".to_string())
-                .build()
-                .unwrap(),
-            None
-        ).await
-        .unwrap();
+    tracker
+        .track(TrackedEvent {
+            payload: WebPage {
+                name: "test".to_owned(),
+                id: "something else".to_owned(),
+            },
+            id: Some(event_id),
+            timestamp: None,
+        })
+        .await
+        .expect("Failed to send Snowplow event");
 
     println!("--- DEBUGGING ---");
-    println!("Self Describing Event: {}", self_desc_event_id);
-    println!("Structured Event: {}", struct_event_id);
-    println!("Screen View: {}", screen_view_event_id);
+    println!("Self Describing Event: {}", event_id);
 }

@@ -9,6 +9,10 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
+// TODO: Additional tests
+// TODO: logging with tracing
+// TODO: some more reorganization of modules
+
 //! # Snowplow Rust Tracker
 //!
 //! The Snowplow Rust Tracker allows you to track Snowplow events in your Rust applications.
@@ -35,16 +39,11 @@
 //! ```
 #![deny(missing_docs)]
 
-mod tracker;
 mod emitter;
-mod event;
-mod snowplow;
 mod payload;
+mod tracker;
+pub(crate) mod util;
 
-pub use snowplow::Snowplow;
-pub use tracker::Tracker;
 pub use emitter::Emitter;
-pub use event::ScreenViewEvent;
-pub use event::StructuredEvent;
-pub use event::SelfDescribingEvent;
-pub use payload::SelfDescribingJson;
+pub use payload::{HasSchema, Platform, Schema, SchemaVersion, SnowplowTimestamp};
+pub use tracker::{TrackedEvent, Tracker};

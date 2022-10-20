@@ -13,26 +13,39 @@ use std::future::ready;
 
 use futures::TryStreamExt as _;
 use reqwest::Client;
-use serde::Serialize;
 
+use serde::Serialize;
 use url::Url;
 
-use crate::payload::Payload;
+use crate::payload::{Envelope, HasSchema, Schema, SchemaVersion, SnowplowEvent};
 
-#[derive(Debug, Clone, Serialize)]
-struct PayloadContainer {
-    schema: &'static str,
-    data: Vec<Payload>,
+/// The outermost type that is actually sent to snowplow as a JSON payload.
+/// Includes an outermost schema and a Vec of [`SnowplowEvent`].
+type EventContainer<'a, Payload> = Envelope<Vec<SnowplowEvent<'a, Payload>>>;
+
+impl<'a, Payload: HasSchema> EventContainer<'a, Payload> {
+    pub fn new(events: impl IntoIterator<Item = SnowplowEvent<'a, Payload>>) -> Self {
+        Envelope(events.into_iter().collect())
+    }
+}
+
+impl<'a, Payload: HasSchema> HasSchema for Vec<SnowplowEvent<'a, Payload>> {
+    fn schema(&self) -> Schema {
+        Schema::new_snowplow("payload_data", SchemaVersion::new(1, 0, 4))
+    }
 }
 
 /// Emitter is responsible for emitting tracked events to the Snowplow
-/// Collector. It takes care of the low-level HTTP stuff.
+/// Collector. It takes care of the low-level HTTP stuff. You should probably
+/// be using [`Tracker`][crate::Tracker] instead.
 pub struct Emitter {
     collector_url: Url,
     client: Client,
 }
 
 impl Emitter {
+    /// Create a new emitter that will send events to the given Url using the
+    /// given client.
     pub fn new(collector_url: Url, client: Client) -> Emitter {
         Emitter {
             collector_url,
@@ -40,14 +53,12 @@ impl Emitter {
         }
     }
 
-    pub async fn track_events(
+    /// Track a batch of events, sending them to the snowplow collector
+    pub async fn track_events<Payload: HasSchema + Serialize>(
         &self,
-        events: impl IntoIterator<Item = Payload>,
+        events: impl IntoIterator<Item = SnowplowEvent<'_, Payload>>,
     ) -> Result<(), reqwest::Error> {
-        let events = PayloadContainer {
-            schema: "iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4",
-            data: events.into_iter().collect(),
-        };
+        let events = EventContainer::new(events);
 
         let response = self
             .client
@@ -64,7 +75,11 @@ impl Emitter {
             .await
     }
 
-    pub async fn track_event(&self, event: Payload) -> Result<(), reqwest::Error> {
+    /// Track a single event
+    pub async fn track_event<Payload: HasSchema + Serialize>(
+        &self,
+        event: SnowplowEvent<'_, Payload>,
+    ) -> Result<(), reqwest::Error> {
         self.track_events([event]).await
     }
 }
