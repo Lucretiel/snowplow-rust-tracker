@@ -9,10 +9,11 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
+use anyhow::Context as _;
 use serde::Serialize;
-use snowplow_tracker::{HasSchema, Platform, Schema, SchemaVersion, TrackedEvent, Tracker};
 use uuid::Uuid;
 
+use snowplow_tracker::{HasSchema, Platform, Schema, SchemaVersion, TrackedEvent, Tracker};
 // An example unstructured event we might want to track
 #[derive(Debug, Serialize)]
 struct WebPage {
@@ -31,7 +32,7 @@ impl HasSchema for WebPage {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let tracker = Tracker::build(
         "ns",
         "app_id".to_owned(),
@@ -54,8 +55,10 @@ async fn main() {
             timestamp: None,
         })
         .await
-        .expect("Failed to send Snowplow event");
+        .context("Failed to send snowplow event")?;
 
     println!("--- DEBUGGING ---");
     println!("Self Describing Event: {}", event_id);
+
+    Ok(())
 }
