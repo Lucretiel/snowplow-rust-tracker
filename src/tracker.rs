@@ -9,6 +9,11 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
+/*!
+The main snowplow [`Tracker`], which used to send your events to a Collector.
+The types in this module are your main entry point to this library.
+*/
+
 use serde::Serialize;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -25,8 +30,11 @@ use crate::{
 /// collectors don't report issues when submitting unexpected
 #[derive(Debug, Error)]
 pub enum TrackError {
+    /// There was an HTTP error sending the event– the response was malformed,
+    /// or there was a TCP error. This variant does *not* include HTTP error
+    /// codes.
     #[error("Unexpected error during HTTP request (not an error code)")]
-    Http(#[from] reqwest::Error),
+    HttpConnection(#[from] reqwest::Error),
 }
 
 /// The tracker ID, corresponding to the `tv` field of a snowplow event.
@@ -122,7 +130,7 @@ impl Tracker {
         self.emitter
             .track_events(events)
             .await
-            .map_err(TrackError::Http)
+            .map_err(TrackError::HttpConnection)
     }
 }
 

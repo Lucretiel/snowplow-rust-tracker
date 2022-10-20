@@ -1,3 +1,9 @@
+/*!
+Utility types for serialization. This module contains serde serialization
+wrappers that manage the stringification that Snowplow demands for its
+event containers.
+*/
+
 use std::cell::Cell;
 use std::fmt::{Display, Write as _};
 

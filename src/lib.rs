@@ -39,11 +39,10 @@
 //! ```
 #![deny(missing_docs)]
 
-mod emitter;
-mod payload;
-mod tracker;
-pub(crate) mod util;
+pub mod emitter;
+pub mod payload;
+pub mod tracker;
+pub mod util;
 
-pub use emitter::Emitter;
-pub use payload::{HasSchema, Platform, Schema, SchemaVersion, SnowplowTimestamp};
-pub use tracker::{TrackedEvent, Tracker};
+pub use payload::{HasSchema, Platform, Schema, SchemaVersion};
+pub use tracker::{TrackedEvent, Tracker, TrackerConfig};

@@ -9,6 +9,13 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the Apache License Version 2.0 for the specific language governing permissions and limitations there under.
 
+/*!
+A snowplow event [`Emitter`]. This type manages the low-level details of sending
+events over HTTP to a Collector. Generally you should prefer to use a
+[`Tracker`][crate::tracker::Tracker], which wraps an [`Emitter`] handles a lot
+of the bookkeeping required to construct full snowplow events.
+ */
+
 use std::future::ready;
 
 use futures::TryStreamExt as _;
@@ -21,9 +28,13 @@ use crate::payload::{Envelope, HasSchema, Schema, SchemaVersion, SnowplowEvent};
 
 /// The outermost type that is actually sent to snowplow as a JSON payload.
 /// Includes an outermost schema and a Vec of [`SnowplowEvent`].
+// TODO: It will be exceedingly common to only need to send a single event;
+// create an optimized version of this type to handle that use case.
 type EventContainer<'a, Payload> = Envelope<Vec<SnowplowEvent<'a, Payload>>>;
 
 impl<'a, Payload: HasSchema> EventContainer<'a, Payload> {
+    /// Create a new event container. This will collect all of the given events
+    /// into a [`Vec`].
     pub fn new(events: impl IntoIterator<Item = SnowplowEvent<'a, Payload>>) -> Self {
         Envelope(events.into_iter().collect())
     }
@@ -46,7 +57,7 @@ pub struct Emitter {
 impl Emitter {
     /// Create a new emitter that will send events to the given Url using the
     /// given client.
-    pub fn new(collector_url: Url, client: Client) -> Emitter {
+    pub const fn new(collector_url: Url, client: Client) -> Emitter {
         Emitter {
             collector_url,
             client,
