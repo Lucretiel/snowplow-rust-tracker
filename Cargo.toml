@@ -17,6 +17,7 @@ lazy_format = "2.0.0"
 itoa = "1.0.4"
 thiserror = "1.0.37"
 tracing = "0.1.37"
+clap = { version = "4.0.17", features = ["derive"] }
 
 [dev-dependencies]
 anyhow = "1.0.65"

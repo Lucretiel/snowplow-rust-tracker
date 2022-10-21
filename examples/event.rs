@@ -11,9 +11,20 @@
 
 use anyhow::Context as _;
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use snowplow_tracker::{HasSchema, Platform, Schema, SchemaVersion, TrackedEvent, Tracker};
+
+#[derive(clap::Parser)]
+struct Args {
+    #[clap(short, long)]
+    schema: String,
+
+    #[clap(short, long)]
+    payload: JsonValue,
+}
+
 // An example unstructured event we might want to track
 #[derive(Debug, Serialize)]
 struct WebPage {
