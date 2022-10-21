@@ -45,4 +45,4 @@ pub mod tracker;
 pub mod util;
 
 pub use payload::{HasSchema, Platform, Schema, SchemaVersion};
-pub use tracker::{TrackedEvent, Tracker, TrackerConfig};
+pub use tracker::{TrackError, TrackedEvent, Tracker, TrackerConfig};
