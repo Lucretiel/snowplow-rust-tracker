@@ -290,6 +290,18 @@ pub trait HasSchema {
     fn schema(&self) -> Schema;
 }
 
+impl<T: HasSchema> HasSchema for &T {
+    fn schema(&self) -> Schema {
+        T::schema(*self)
+    }
+}
+
+impl<T: HasSchema> HasSchema for Box<T> {
+    fn schema(&self) -> Schema {
+        T::schema(self.as_ref())
+    }
+}
+
 impl<T: HasSchema + Serialize> Serialize for Envelope<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

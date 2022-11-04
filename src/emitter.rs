@@ -58,6 +58,7 @@ impl Emitter {
     /// Create a new emitter that will send events to the given Url using the
     /// given client.
     pub const fn new(collector_url: Url, client: Client) -> Emitter {
+        // TODO: log a warning if the Url doesn't look right
         Emitter {
             collector_url,
             client,
