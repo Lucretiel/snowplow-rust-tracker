@@ -114,6 +114,12 @@ impl SnowplowTimestamp {
     }
 }
 
+impl From<SystemTime> for SnowplowTimestamp {
+    fn from(time: SystemTime) -> Self {
+        Self { timestamp: time }
+    }
+}
+
 impl Serialize for SnowplowTimestamp {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
