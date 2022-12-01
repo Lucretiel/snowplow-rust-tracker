@@ -367,3 +367,64 @@ impl<Payload: HasSchema> PayloadWrapper<Payload> {
         Envelope(UnstructWrapper(Envelope(payload)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_test::{assert_ser_tokens, Token};
+
+    #[derive(Debug, Serialize)]
+    struct WebPage {
+        name: String,
+        id: String,
+    }
+
+    impl HasSchema for WebPage {
+        fn schema(&self) -> Schema {
+            Schema::new(
+                "com.snowplowanalytics.snowplow",
+                "screen_view",
+                SchemaVersion::new(1, 0, 0),
+            )
+        }
+    }
+
+    #[test]
+    fn test_envelope_serialization() {
+        let test_payload = WebPage {
+            name: "test".to_owned(),
+            id: "test id".to_owned(),
+        };
+        let wrapper = PayloadWrapper::new(test_payload);
+        assert_ser_tokens(
+            &wrapper,
+            &[
+                Token::Struct {
+                    name: "Envelope",
+                    len: 2,
+                },
+                Token::Str("schema"),
+                Token::Str("iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0"),
+                Token::Str("data"),
+                Token::Struct {
+                    name: "Envelope",
+                    len: 2,
+                },
+                Token::Str("schema"),
+                Token::Str("iglu:com.snowplowanalytics.snowplow/screen_view/jsonschema/1-0-0"),
+                Token::Str("data"),
+                Token::Struct {
+                    name: "WebPage",
+                    len: 2,
+                },
+                Token::Str("name"),
+                Token::Str("test"),
+                Token::Str("id"),
+                Token::Str("test id"),
+                Token::StructEnd,
+                Token::StructEnd,
+                Token::StructEnd,
+            ],
+        );
+    }
+}
