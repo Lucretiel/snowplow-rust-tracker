@@ -41,6 +41,7 @@
 
 pub mod emitter;
 pub mod payload;
+mod tests;
 pub mod tracker;
 pub mod util;
 

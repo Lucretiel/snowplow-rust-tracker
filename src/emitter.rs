@@ -30,7 +30,7 @@ use crate::payload::{Envelope, HasSchema, Schema, SchemaVersion, SnowplowEvent};
 /// Includes an outermost schema and a Vec of [`SnowplowEvent`].
 // TODO: It will be exceedingly common to only need to send a single event;
 // create an optimized version of this type to handle that use case.
-type EventContainer<'a, Payload> = Envelope<Vec<SnowplowEvent<'a, Payload>>>;
+pub(crate) type EventContainer<'a, Payload> = Envelope<Vec<SnowplowEvent<'a, Payload>>>;
 
 impl<'a, Payload: HasSchema> EventContainer<'a, Payload> {
     /// Create a new event container. This will collect all of the given events
