@@ -106,7 +106,7 @@ mod tests {
     };
     use serde::Serialize;
     use serde_test::{assert_ser_tokens, Configure, Token};
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
     use uuid::Uuid;
 
     #[derive(Debug, Serialize)]
@@ -170,24 +170,44 @@ mod tests {
             name: "test".to_owned(),
             id: "test id".to_owned(),
         };
-        let mut test_event = TrackedEvent::new(test_payload);
-        let test_uuid =
-            Uuid::parse_str("a1a2a3a4b1b2c1c2d1d2d3d4d5d6d7d8").expect("failed to create UUID");
-        let time_since_epoch;
-        let current_timestamp = SystemTime::now();
-        match current_timestamp.duration_since(SystemTime::UNIX_EPOCH) {
-            Ok(duration) => {
-                test_event.timestamp = Some(SnowplowTimestamp::from(current_timestamp));
-                time_since_epoch = duration.as_millis();
-            }
-            Err(_) => panic!("SystemTime before UNIX EPOCH!"),
-        }
 
-        let event_timestamp: &'static str =
-            Box::leak(time_since_epoch.to_string().into_boxed_str());
+        let test_uuid = Uuid::new_v4();
+        let event_sent = SystemTime::now();
+        let event_created = event_sent - Duration::from_secs(1);
 
-        test_event.id = Some(test_uuid.clone());
-        let now = SnowplowTimestamp::now();
+        // Leaking is necessary here because serde_test expects only static
+        // strings as input
+
+        let event_sent_string = Box::leak(
+            format!(
+                "{}",
+                event_sent
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("failed to get time since unix epoch")
+                    .as_millis()
+            )
+            .into_boxed_str(),
+        );
+
+        let event_created_string = Box::leak(
+            format!(
+                "{}",
+                event_created
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("failed to get time since unix epoch")
+                    .as_millis()
+            )
+            .into_boxed_str(),
+        );
+
+        let uuid_string = Box::leak(format!("{test_uuid}").into_boxed_str());
+
+        let test_event = TrackedEvent {
+            id: Some(test_uuid),
+            timestamp: Some(SnowplowTimestamp::from(event_created)),
+            payload: test_payload,
+        };
+
         let events = [test_event].into_iter().map(|event| SnowplowEvent {
             event_type: EventType::SelfDescribingEvent,
             payload: JsonString(PayloadWrapper::new(event.payload)),
@@ -196,8 +216,10 @@ mod tests {
             tracker_id: "test tracker ID",
             namespace: "test namespace",
             event_id: event.id,
-            created_timestamp: event.timestamp.unwrap_or(now),
-            sent_timestamp: event.timestamp.unwrap_or(now),
+            created_timestamp: event
+                .timestamp
+                .unwrap_or_else(|| SnowplowTimestamp::from(event_sent)),
+            sent_timestamp: SnowplowTimestamp::from(event_sent),
         });
 
         let events = EventContainer::new(events);
@@ -227,11 +249,11 @@ mod tests {
                         Token::Str("test namespace"),
                         Token::Str("eid"),
                         Token::Some,
-                        Token::Str("a1a2a3a4-b1b2-c1c2-d1d2-d3d4d5d6d7d8"),
+                        Token::Str(uuid_string),
                         Token::Str("dtm"),
-                        Token::Str(event_timestamp),
+                        Token::Str(event_created_string),
                         Token::Str("stm"),
-                        Token::Str(event_timestamp),
+                        Token::Str(event_sent_string),
                         Token::StructEnd,
                         Token::SeqEnd,
                         Token::StructEnd,
