@@ -20,9 +20,9 @@ use std::future::ready;
 
 use futures::TryStreamExt as _;
 use reqwest::Client;
+use reqwest::Url;
 
 use serde::Serialize;
-use url::Url;
 
 use crate::payload::{Envelope, HasSchema, Schema, SchemaVersion, SnowplowEvent};
 

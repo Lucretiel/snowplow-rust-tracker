@@ -14,10 +14,10 @@ The main snowplow [`Tracker`], which used to send your events to a Collector.
 The types in this module are your main entry point to this library.
 */
 
+use reqwest::Url;
 use serde::Serialize;
 use std::fmt::Debug;
 use thiserror::Error;
-use url::Url;
 use uuid::Uuid;
 
 use crate::{
